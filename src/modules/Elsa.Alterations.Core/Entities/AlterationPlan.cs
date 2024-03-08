@@ -38,4 +38,8 @@ public class AlterationPlan : Entity
     /// The date and time at which the plan was completed.
     /// </summary>
     public DateTimeOffset? CompletedAt { get; set; }
+     
+    //Temporary fix for shadow properties not working with PostgreSQL #5046
+    public string? SerializedAlterations { get; set; }
+    public string? SerializedWorkflowInstanceIds { get; set; }
 }

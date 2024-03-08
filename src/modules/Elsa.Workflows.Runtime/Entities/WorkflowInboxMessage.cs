@@ -51,4 +51,9 @@ public class WorkflowInboxMessage : Entity
     /// The date and time the message expires.
     /// </summary>
     public DateTimeOffset ExpiresAt { get; set; }
+    
+    
+    //Temporary fix for shadow properties not working with PostgreSQL #5046
+    public string? SerializedInput { get; set; }
+    public string? SerializedBookmarkPayload { get; set; }
 }

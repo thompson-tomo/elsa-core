@@ -84,4 +84,9 @@ public class StoredBookmark
     /// The date and time the bookmark was created.
     /// </summary>
     public DateTimeOffset CreatedAt { get; set; }
+    
+    
+    //Temporary fix for shadow properties not working with PostgreSQL #5046
+    public string? SerializedPayload { get; set; }
+    public string? SerializedMetadata { get; set; }
 }

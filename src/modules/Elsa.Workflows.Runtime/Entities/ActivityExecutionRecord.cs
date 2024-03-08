@@ -82,4 +82,13 @@ public class ActivityExecutionRecord : Entity
     /// Gets or sets the time at which the activity execution completed.
     /// </summary>
     public DateTimeOffset? CompletedAt { get; set; }
+    
+    
+    //Temporary fix for shadow properties not working with PostgreSQL #5046
+    public string? SerializedActivityState { get; set; }
+    public string? SerializedActivityStateCompressionAlgorithm { get; set; }
+    public string? SerializedException { get; set; }
+    public string? SerializedPayload { get; set; }
+    public string? SerializedOutputs { get; set; }
+    public string? SerializedProperties { get; set; }
 }

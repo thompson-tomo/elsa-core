@@ -20,7 +20,7 @@ public class Configurations :
     public void Configure(EntityTypeBuilder<StoredTrigger> builder)
     {
         builder.Ignore(x => x.Payload);
-        builder.Property<string>("SerializedPayload");
+        // builder.Property<string>("SerializedPayload"); //Temporarily disabled due to shadow properties not working with PostgreSQL #5046
         builder.HasIndex(x => x.WorkflowDefinitionId).HasDatabaseName($"IX_{nameof(StoredTrigger)}_{nameof(StoredTrigger.WorkflowDefinitionId)}");
         builder.HasIndex(x => x.WorkflowDefinitionVersionId).HasDatabaseName($"IX_{nameof(StoredTrigger)}_{nameof(StoredTrigger.WorkflowDefinitionVersionId)}");
         builder.HasIndex(x => x.Name).HasDatabaseName($"IX_{nameof(StoredTrigger)}_{nameof(StoredTrigger.Name)}");
@@ -32,8 +32,8 @@ public class Configurations :
     {
         builder.Ignore(x => x.ActivityState);
         builder.Ignore(x => x.Payload);
-        builder.Property<string>("SerializedActivityState");
-        builder.Property<string>("SerializedPayload");
+        // builder.Property<string>("SerializedActivityState");//Temporarily disabled due to shadow properties not working with PostgreSQL #5046
+        // builder.Property<string>("SerializedPayload");//Temporarily disabled due to shadow properties not working with PostgreSQL #5046
 
         builder.HasIndex(x => x.Timestamp).HasDatabaseName($"IX_{nameof(WorkflowExecutionLogRecord)}_{nameof(WorkflowExecutionLogRecord.Timestamp)}");
         builder.HasIndex(x => x.Sequence).HasDatabaseName($"IX_{nameof(WorkflowExecutionLogRecord)}_{nameof(WorkflowExecutionLogRecord.Sequence)}");
@@ -61,12 +61,12 @@ public class Configurations :
         builder.Ignore(x => x.Payload);
         builder.Ignore(x => x.Outputs);
         builder.Ignore(x => x.Properties);
-        builder.Property<string>("SerializedActivityState");
-        builder.Property<string>("SerializedActivityStateCompressionAlgorithm");
-        builder.Property<string>("SerializedException");
-        builder.Property<string>("SerializedPayload");
-        builder.Property<string>("SerializedOutputs");
-        builder.Property<string>("SerializedProperties");
+        // builder.Property<string>("SerializedActivityState");//Temporary fix for shadow properties not working with PostgreSQL #5046
+        // builder.Property<string>("SerializedActivityStateCompressionAlgorithm");//Temporary fix for shadow properties not working with PostgreSQL #5046
+        // builder.Property<string>("SerializedException");//Temporary fix for shadow properties not working with PostgreSQL #5046
+        // builder.Property<string>("SerializedPayload");//Temporary fix for shadow properties not working with PostgreSQL #5046
+        // builder.Property<string>("SerializedOutputs");//Temporary fix for shadow properties not working with PostgreSQL #5046
+        // builder.Property<string>("SerializedProperties");//Temporary fix for shadow properties not working with PostgreSQL #5046
         builder.Property(x => x.Status).HasConversion<string>();
         
         builder.HasIndex(x => x.WorkflowInstanceId).HasDatabaseName($"IX_{nameof(ActivityExecutionRecord)}_{nameof(ActivityExecutionRecord.WorkflowInstanceId)}");
@@ -87,8 +87,8 @@ public class Configurations :
     {
         builder.Ignore(x => x.Payload);
         builder.Ignore(x => x.Metadata);
-        builder.Property<string>("SerializedPayload");
-        builder.Property<string>("SerializedMetadata");
+        // builder.Property<string>("SerializedPayload");//Temporary fix for shadow properties not working with PostgreSQL #5046
+        // builder.Property<string>("SerializedMetadata");//Temporary fix for shadow properties not working with PostgreSQL #5046
         builder.HasKey(x => x.BookmarkId);
         builder.HasIndex(x => x.ActivityTypeName, $"IX_{nameof(StoredBookmark)}_{nameof(StoredBookmark.ActivityTypeName)}");
         builder.HasIndex(x => x.Hash, $"IX_{nameof(StoredBookmark)}_{nameof(StoredBookmark.Hash)}");
@@ -104,8 +104,8 @@ public class Configurations :
     {
         builder.Ignore(x => x.Input);
         builder.Ignore(x => x.BookmarkPayload);
-        builder.Property<string>("SerializedInput");
-        builder.Property<string>("SerializedBookmarkPayload");
+        // builder.Property<string>("SerializedInput");//Temporary fix for shadow properties not working with PostgreSQL #5046
+        // builder.Property<string>("SerializedBookmarkPayload");//Temporary fix for shadow properties not working with PostgreSQL #5046
         builder.HasIndex(x => x.ActivityTypeName, $"IX_{nameof(WorkflowInboxMessage)}_{nameof(WorkflowInboxMessage.ActivityTypeName)}");
         builder.HasIndex(x => x.Hash, $"IX_{nameof(WorkflowInboxMessage)}_{nameof(WorkflowInboxMessage.Hash)}");
         builder.HasIndex(x => x.WorkflowInstanceId, $"IX_{nameof(WorkflowInboxMessage)}_{nameof(WorkflowInboxMessage.WorkflowInstanceId)}");

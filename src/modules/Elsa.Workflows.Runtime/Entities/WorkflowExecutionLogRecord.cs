@@ -96,4 +96,9 @@ public class WorkflowExecutionLogRecord : Entity
     /// Any additional payload associated with the log entry.
     /// </summary>
     public object? Payload { get; set; }
+    
+    
+    //Temporary fix for shadow properties not working with PostgreSQL #5046
+    public string SerializedActivityState { get; set; }  = default!;
+    public string SerializedPayload { get; set; }  = default!;
 }

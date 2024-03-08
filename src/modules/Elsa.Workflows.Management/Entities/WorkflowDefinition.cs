@@ -94,4 +94,10 @@ public class WorkflowDefinition : VersionedEntity
     /// </summary>
     /// <returns></returns>
     public WorkflowDefinition ShallowClone() => (WorkflowDefinition)MemberwiseClone();
+    
+    //Temporary fix for shadow properties not working with PostgreSQL #5046
+    public string? Data { get; set; }
+    public bool? UsableAsActivity { get; set; }
+    
+    
 }

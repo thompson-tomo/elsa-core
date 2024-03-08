@@ -36,4 +36,8 @@ public class StoredTrigger : Entity
     /// The payload of the trigger.
     /// </summary>
     public object? Payload { get; set; }
+    
+    
+    //Temporary fix for shadow properties not working with PostgreSQL #5046
+    public string? SerializedPayload { get; set; }
 }

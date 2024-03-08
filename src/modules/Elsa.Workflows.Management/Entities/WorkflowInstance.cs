@@ -67,4 +67,9 @@ public class WorkflowInstance : Entity
     /// The timestamp when the workflow instance was finished.
     /// </summary>
     public DateTimeOffset? FinishedAt { get; set; }
+    
+    
+    //Temporary fix for shadow properties not working with PostgreSQL #5046
+    public string? Data { get; set; }
+    public string? DataCompressionAlgorithm { get; set; }
 }

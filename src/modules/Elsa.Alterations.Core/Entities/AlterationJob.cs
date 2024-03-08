@@ -43,4 +43,8 @@ public class AlterationJob : Entity
     /// The date and time at which the job was completed.
     /// </summary>
     public DateTimeOffset? CompletedAt { get; set; }
+     
+    
+    //Temporary fix for shadow properties not working with PostgreSQL #5046
+    public string? SerializedLog { get; set; }
 }
