@@ -2,9 +2,11 @@ using System.Collections;
 using System.ComponentModel;
 using System.Dynamic;
 using System.Globalization;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
+using System.Text.Unicode;
 using Elsa.Expressions.Contracts;
 using Elsa.Expressions.Exceptions;
 using Elsa.Expressions.Extensions;
@@ -67,6 +69,12 @@ public static class ObjectConverter
         options.ReferenceHandler = ReferenceHandler.Preserve;
         options.PropertyNameCaseInsensitive = true;
         options.Converters.Add(new JsonStringEnumConverter());
+        options.Encoder = JavaScriptEncoder.Create(UnicodeRanges.All);
+
+        var internalSerializerOptions = new JsonSerializerOptions
+        {
+            Encoder = JavaScriptEncoder.Create(UnicodeRanges.All) 
+        };
 
         var underlyingTargetType = Nullable.GetUnderlyingType(targetType) ?? targetType;
         var underlyingSourceType = Nullable.GetUnderlyingType(sourceType) ?? sourceType;
@@ -125,7 +133,7 @@ public static class ObjectConverter
         {
             if (typeof(ExpandoObject) == underlyingTargetType)
             {
-                var expandoJson = JsonSerializer.Serialize(value);
+                var expandoJson = JsonSerializer.Serialize(value, internalSerializerOptions);
                 return ConvertTo(expandoJson, underlyingTargetType, converterOptions);
             }
 
@@ -133,13 +141,13 @@ public static class ObjectConverter
                 return new Dictionary<string, object>((IDictionary<string, object>)value);
 
             var sourceDictionary = (IDictionary<string, object>)value;
-            var json = JsonSerializer.Serialize(sourceDictionary);
+            var json = JsonSerializer.Serialize(sourceDictionary, internalSerializerOptions);
             return ConvertTo(json, underlyingTargetType, converterOptions);
         }
 
         if (typeof(IEnumerable<object>).IsAssignableFrom(underlyingSourceType))
             if (underlyingTargetType == typeof(string))
-                return JsonSerializer.Serialize(value);
+                return JsonSerializer.Serialize(value, internalSerializerOptions);
 
         var targetTypeConverter = TypeDescriptor.GetConverter(underlyingTargetType);
 
