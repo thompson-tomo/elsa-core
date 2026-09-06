@@ -188,8 +188,8 @@ public class ExternalAuthenticationRoleDeletionDependencyContributorTests
         var contributor = new ExternalAuthenticationRoleDeletionDependencyContributor(
             connectionStore,
             new MutableOptionsMonitor<ExternalAuthenticationOptions>(new ExternalAuthenticationOptions()),
-            roleAuthorizationService,
-            roleStore,
+            [roleAuthorizationService],
+            [roleStore],
             versions,
             new ConnectionRevisionCalculator(),
             new ExternalAuthenticationSecurityNotifier(services),
@@ -291,8 +291,8 @@ public class ExternalAuthenticationRoleDeletionDependencyContributorTests
         var contributor = new ExternalAuthenticationRoleDeletionDependencyContributor(
             store,
             new MutableOptionsMonitor<ExternalAuthenticationOptions>(new ExternalAuthenticationOptions { ConfigurationConnections = configuredConnections.ToList() }),
-            new RoleAuthorizationService(new StoreBasedRoleProvider(roleStore), new PermissionEvaluator()),
-            roleStore,
+            [new RoleAuthorizationService(new StoreBasedRoleProvider(roleStore), new PermissionEvaluator())],
+            [roleStore],
             versions,
             new ConnectionRevisionCalculator(),
             new ExternalAuthenticationSecurityNotifier(services),

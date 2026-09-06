@@ -20,8 +20,8 @@ namespace Elsa.ExternalAuthentication.Services;
 public sealed class ExternalAuthenticationRoleDeletionDependencyContributor(
     IIdentityProviderConnectionStore store,
     IOptionsMonitor<ExternalAuthenticationOptions> options,
-    IRoleAuthorizationService roleAuthorizationService,
-    IRoleStore roleStore,
+    IEnumerable<IRoleAuthorizationService> roleAuthorizationServices,
+    IEnumerable<IRoleStore> roleStores,
     IConnectionRegistryVersionStore registryVersions,
     ConnectionRevisionCalculator revisionCalculator,
     ExternalAuthenticationSecurityNotifier notifier,
@@ -67,6 +67,9 @@ public sealed class ExternalAuthenticationRoleDeletionDependencyContributor(
 
     public async ValueTask<RoleReferenceRemovalValidationResult> ValidateRemovalAsync(RoleReferenceRemovalRequest request, CancellationToken cancellationToken = default)
     {
+        var roleAuthorizationService = roleAuthorizationServices.SingleOrDefault();
+        if (roleAuthorizationService is null)
+            return new RoleReferenceRemovalValidationResult.Forbidden("role_authorization_unavailable");
         if (!permissionEvaluator.HasPermission(request.Actor, ExternalAuthenticationResourcePermissions.Connections, CoreVerbs.Update) ||
             !permissionEvaluator.HasPermission(request.Actor, ExternalAuthenticationResourcePermissions.Policies, CoreVerbs.Update) ||
             !permissionEvaluator.HasPermission(request.Actor, ExternalAuthenticationResourcePermissions.PolicyDefaultRoles, CoreVerbs.Update))
@@ -116,6 +119,9 @@ public sealed class ExternalAuthenticationRoleDeletionDependencyContributor(
 
     public async ValueTask<RoleReferenceRemovalResult> RemoveEditableReferencesAsync(RoleReferenceRemovalRequest request, CancellationToken cancellationToken = default)
     {
+        var roleAuthorizationService = roleAuthorizationServices.SingleOrDefault();
+        if (roleAuthorizationService is null)
+            return new RoleReferenceRemovalResult.Failed("role_authorization_unavailable", []);
         var validation = await ValidateRemovalAsync(request, cancellationToken);
         if (validation is RoleReferenceRemovalValidationResult.Forbidden forbidden)
             return new RoleReferenceRemovalResult.Failed(forbidden.Code, []);
@@ -141,6 +147,9 @@ public sealed class ExternalAuthenticationRoleDeletionDependencyContributor(
 
                 if (request.SelectedReferences is not null && removesLastDefaultRole)
                 {
+                    var roleStore = roleStores.SingleOrDefault();
+                    if (roleStore is null)
+                        return new RoleReferenceRemovalResult.Failed("replacement_role_unavailable_or_unauthorized", changedOwnerIds);
                     var replacement = await roleStore.FindAsync(new() { Id = request.ReplacementRoleId }, cancellationToken);
                     if (replacement is null ||
                         !await roleAuthorizationService.CanAssignRolesAsync(request.Actor, [replacement.Id], cancellationToken))
