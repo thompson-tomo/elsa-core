@@ -59,13 +59,22 @@ public sealed class RoleDeletionCoordinator(
             return new RoleDeletionOperationResult.PreconditionFailed(impact);
         if (impact.Dependencies.Any(x => x.Ownership == RoleDeletionDependencyOwnership.Configuration))
             return new RoleDeletionOperationResult.Blocked(impact);
+        var selectionError = ValidateSelectedReferences(impact, command.SelectedReferences);
+        if (selectionError is not null)
+            return new RoleDeletionOperationResult.ValidationFailed(impact, selectionError);
+
         if (impact.CanDelete)
         {
             await roleStore.DeleteAsync(new() { Id = command.RoleId }, cancellationToken);
             return new RoleDeletionOperationResult.Deleted([]);
         }
 
-        var warnings = GetRequiredConfirmations(impact, command);
+        var selectedDependencies = SelectEditableDependencies(impact, command.SelectedReferences);
+        var replacementValidation = await ValidateReplacementRoleAsync(impact, command, selectedDependencies, cancellationToken);
+        if (replacementValidation is not null)
+            return replacementValidation;
+
+        var warnings = GetRequiredConfirmations(impact, command, selectedDependencies);
         if (warnings.Count != 0)
             return new RoleDeletionOperationResult.ConfirmationRequired(impact, warnings);
 
@@ -75,12 +84,16 @@ public sealed class RoleDeletionCoordinator(
             return new RoleDeletionOperationResult.PreconditionFailed(currentImpact);
 
         var requests = snapshots
-            .Where(x => x.Dependencies.Any(dependency => dependency.Ownership == RoleDeletionDependencyOwnership.Database))
+            .Where(x => x.Dependencies.Any(dependency => dependency.Ownership == RoleDeletionDependencyOwnership.Database && IsSelected(dependency, command.SelectedReferences)))
             .Select(snapshot => new RoleReferenceRemovalRequest(
                 command.RoleId,
                 command.Actor,
                 snapshot.Version,
-                snapshot.Dependencies.Where(x => x.Ownership == RoleDeletionDependencyOwnership.Database).ToArray()))
+                snapshot.Dependencies.Where(x => x.Ownership == RoleDeletionDependencyOwnership.Database && IsSelected(x, command.SelectedReferences)).ToArray())
+            {
+                SelectedReferences = command.SelectedReferences,
+                ReplacementRoleId = command.ReplacementRoleId
+            })
             .ToArray();
 
         foreach (var request in requests)
@@ -176,16 +189,89 @@ public sealed class RoleDeletionCoordinator(
         return $"role-dependencies-{Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(payload))).ToLowerInvariant()}";
     }
 
-    private static IReadOnlyCollection<string> GetRequiredConfirmations(RoleDeletionImpact impact, RoleDeletionRemediationCommand command)
+    private static IReadOnlyCollection<string> GetRequiredConfirmations(
+        RoleDeletionImpact impact,
+        RoleDeletionRemediationCommand command,
+        IReadOnlyCollection<RoleDeletionDependency> selectedDependencies)
     {
         var warnings = new List<string>();
-        if (!command.ConfirmRemoveFromEditablePolicies)
+        var selective = command.SelectedReferences is not null;
+        var remediationRequested = !selective || selectedDependencies.Count != 0;
+        if (remediationRequested && !command.ConfirmRemoveFromEditablePolicies)
             warnings.Add("confirm_remove_from_editable_jit_policies");
-        if (impact.Dependencies.Any(x => x.RemovesLastDefaultRole) && !command.ConfirmEmptyDefaultRoles)
+        var removesLastDefaultRole = selective
+            ? selectedDependencies.Any(x => x.RemovesLastDefaultRole)
+            : impact.Dependencies.Any(x => x.RemovesLastDefaultRole);
+        if (!selective && removesLastDefaultRole && !command.ConfirmEmptyDefaultRoles)
             warnings.Add("removes_last_default_role");
-        if (impact.ExecutionMode == RoleDeletionExecutionMode.BestEffort && !command.ConfirmBestEffort)
+        if (remediationRequested && impact.ExecutionMode == RoleDeletionExecutionMode.BestEffort && !command.ConfirmBestEffort)
             warnings.Add("confirm_best_effort");
         return warnings;
+    }
+
+    private static IReadOnlyCollection<RoleDeletionDependency> SelectEditableDependencies(
+        RoleDeletionImpact impact,
+        IReadOnlyCollection<RoleDeletionReferenceSelection>? selectedReferences) =>
+        impact.Dependencies
+            .Where(x => x.Ownership == RoleDeletionDependencyOwnership.Database && IsSelected(x, selectedReferences))
+            .ToArray();
+
+    private async ValueTask<RoleDeletionOperationResult?> ValidateReplacementRoleAsync(
+        RoleDeletionImpact impact,
+        RoleDeletionRemediationCommand command,
+        IReadOnlyCollection<RoleDeletionDependency> selectedDependencies,
+        CancellationToken cancellationToken)
+    {
+        if (command.SelectedReferences is null || !selectedDependencies.Any(x => x.RemovesLastDefaultRole))
+            return null;
+
+        if (string.IsNullOrWhiteSpace(command.ReplacementRoleId))
+            return new RoleDeletionOperationResult.ValidationFailed(impact, "replacement_role_required");
+        if (string.Equals(command.ReplacementRoleId, command.RoleId, StringComparison.Ordinal))
+            return new RoleDeletionOperationResult.ValidationFailed(impact, "replacement_role_must_differ");
+
+        var replacement = await roleStore.FindAsync(new() { Id = command.ReplacementRoleId }, cancellationToken);
+        if (replacement is null)
+            return new RoleDeletionOperationResult.ValidationFailed(impact, "replacement_role_not_found");
+        if (!await roleAuthorizationService.CanAssignRolesAsync(command.Actor, [replacement.Id], cancellationToken))
+            return new RoleDeletionOperationResult.Forbidden();
+
+        return null;
+    }
+
+    private static bool IsSelected(RoleDeletionDependency dependency, IReadOnlyCollection<RoleDeletionReferenceSelection>? selectedReferences) =>
+        selectedReferences is null || selectedReferences.Any(x =>
+            string.Equals(x.Source, dependency.Source, StringComparison.Ordinal) &&
+            string.Equals(x.OwnerId, dependency.OwnerId, StringComparison.Ordinal));
+
+    private static string? ValidateSelectedReferences(
+        RoleDeletionImpact impact,
+        IReadOnlyCollection<RoleDeletionReferenceSelection>? selectedReferences)
+    {
+        if (selectedReferences is null)
+            return null;
+
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var selection in selectedReferences)
+        {
+            if (selection is null || string.IsNullOrWhiteSpace(selection.Source) || string.IsNullOrWhiteSpace(selection.OwnerId))
+                return "invalid_reference_selection";
+
+            var key = $"{selection.Source}\n{selection.OwnerId}";
+            if (!seen.Add(key))
+                return "duplicate_reference";
+
+            var matches = impact.Dependencies
+                .Where(x => string.Equals(x.Source, selection.Source, StringComparison.Ordinal) &&
+                            string.Equals(x.OwnerId, selection.OwnerId, StringComparison.Ordinal))
+                .ToArray();
+            if (matches.Length == 0)
+                return "unknown_reference";
+            if (matches.Any(x => x.Ownership != RoleDeletionDependencyOwnership.Database))
+                return "configuration_reference_not_editable";
+        }
+
+        return null;
     }
 
     private async ValueTask<RoleDeletionImpact> GetCurrentImpactAsync(string roleId, CancellationToken cancellationToken) =>

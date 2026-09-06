@@ -13,6 +13,32 @@ namespace Elsa.Identity.UnitTests.Services;
 public class RoleDeletionCoordinatorTests
 {
     [Fact]
+    public void RoleRemediationContractsRetainTheirLegacyConstructors()
+    {
+        var removalConstructor = typeof(RoleReferenceRemovalRequest).GetConstructor([
+            typeof(string),
+            typeof(ClaimsPrincipal),
+            typeof(string),
+            typeof(IReadOnlyCollection<RoleDeletionDependency>)]);
+        var commandConstructor = typeof(RoleDeletionRemediationCommand).GetConstructor([
+            typeof(string),
+            typeof(ClaimsPrincipal),
+            typeof(string),
+            typeof(bool),
+            typeof(bool),
+            typeof(bool)]);
+
+        Assert.NotNull(removalConstructor);
+        Assert.NotNull(commandConstructor);
+        Assert.Single(typeof(RoleReferenceRemovalRequest).GetConstructors());
+        Assert.Single(typeof(RoleDeletionRemediationCommand).GetConstructors());
+        Assert.NotNull(typeof(RoleReferenceRemovalRequest).GetProperty(nameof(RoleReferenceRemovalRequest.SelectedReferences)));
+        Assert.NotNull(typeof(RoleReferenceRemovalRequest).GetProperty(nameof(RoleReferenceRemovalRequest.ReplacementRoleId)));
+        Assert.NotNull(typeof(RoleDeletionRemediationCommand).GetProperty(nameof(RoleDeletionRemediationCommand.SelectedReferences)));
+        Assert.NotNull(typeof(RoleDeletionRemediationCommand).GetProperty(nameof(RoleDeletionRemediationCommand.ReplacementRoleId)));
+    }
+
+    [Fact]
     public async Task InspectionRequiresDeleteRolePermission()
     {
         var (_, coordinator) = await CreateCoordinatorAsync(new StubContributor([]));
@@ -130,6 +156,138 @@ public class RoleDeletionCoordinatorTests
         Assert.Single(contributor.Dependencies);
     }
 
+    [Fact]
+    public async Task SelectiveRemediationChangesOnlySelectedDependenciesAndRetainsRoleWhenOthersRemain()
+    {
+        var contributor = new StubContributor([Dependency("connection-a"), Dependency("connection-b")]);
+        var (store, coordinator) = await CreateCoordinatorAsync(contributor);
+        var impact = Assert.IsType<RoleDeletionInspectionResult.Success>(await coordinator.InspectAsync("workflow-user", Administrator())).Impact;
+
+        var result = await coordinator.RemediateAndDeleteAsync(new(
+            "workflow-user",
+            Administrator(),
+            impact.DependencyVersion,
+            true,
+            true,
+            true)
+        {
+            SelectedReferences = [new RoleDeletionReferenceSelection(StubContributor.SourceName, "connection-a")]
+        });
+
+        var incomplete = Assert.IsType<RoleDeletionOperationResult.Incomplete>(result);
+        Assert.Equal(["connection-a"], incomplete.ChangedOwnerIds);
+        Assert.NotNull(await store.FindAsync(new() { Id = "workflow-user" }));
+        Assert.Equal(["connection-b"], contributor.Dependencies.Select(x => x.OwnerId).ToArray());
+    }
+
+    [Fact]
+    public async Task ExplicitEmptySelectionDoesNotMutateAndReturnsIncomplete()
+    {
+        var contributor = new StubContributor([Dependency("connection-a")]);
+        var (store, coordinator) = await CreateCoordinatorAsync(contributor);
+        var impact = Assert.IsType<RoleDeletionInspectionResult.Success>(await coordinator.InspectAsync("workflow-user", Administrator())).Impact;
+
+        var result = await coordinator.RemediateAndDeleteAsync(new(
+            "workflow-user",
+            Administrator(),
+            impact.DependencyVersion,
+            true,
+            true,
+            true)
+        {
+            SelectedReferences = []
+        });
+
+        var incomplete = Assert.IsType<RoleDeletionOperationResult.Incomplete>(result);
+        Assert.Empty(incomplete.ChangedOwnerIds);
+        Assert.NotNull(await store.FindAsync(new() { Id = "workflow-user" }));
+        Assert.Single(contributor.Dependencies);
+    }
+
+    [Fact]
+    public async Task SelectedFinalDefaultRequiresCoordinatorValidatedReplacementBeforeMutation()
+    {
+        var contributor = new StubContributor([Dependency("connection-a", removesLastDefaultRole: true)]);
+        var (store, coordinator) = await CreateCoordinatorAsync(contributor);
+        var impact = Assert.IsType<RoleDeletionInspectionResult.Success>(await coordinator.InspectAsync("workflow-user", Administrator())).Impact;
+
+        var result = await coordinator.RemediateAndDeleteAsync(new(
+            "workflow-user",
+            Administrator(),
+            impact.DependencyVersion,
+            true,
+            true,
+            true)
+        {
+            SelectedReferences = [new RoleDeletionReferenceSelection(StubContributor.SourceName, "connection-a")],
+            ReplacementRoleId = "replacement-role"
+        });
+
+        var validation = Assert.IsType<RoleDeletionOperationResult.ValidationFailed>(result);
+        Assert.Equal("replacement_role_not_found", validation.Code);
+        Assert.NotNull(await store.FindAsync(new() { Id = "workflow-user" }));
+        Assert.Single(contributor.Dependencies);
+    }
+
+    [Fact]
+    public async Task ConfigurationDependencyBlocksSelectiveDatabaseRemediation()
+    {
+        var contributor = new StubContributor([
+            Dependency("configuration", RoleDeletionDependencyOwnership.Configuration, configurationPath: "ExternalAuthentication:Connections:0"),
+            Dependency("connection-a")
+        ]);
+        var (store, coordinator) = await CreateCoordinatorAsync(contributor);
+        var impact = Assert.IsType<RoleDeletionInspectionResult.Success>(await coordinator.InspectAsync("workflow-user", Administrator())).Impact;
+
+        var result = await coordinator.RemediateAndDeleteAsync(new(
+            "workflow-user",
+            Administrator(),
+            impact.DependencyVersion,
+            true,
+            true,
+            true)
+        {
+            SelectedReferences = [new RoleDeletionReferenceSelection(StubContributor.SourceName, "connection-a")]
+        });
+
+        Assert.IsType<RoleDeletionOperationResult.Blocked>(result);
+        Assert.NotNull(await store.FindAsync(new() { Id = "workflow-user" }));
+        Assert.Equal(2, contributor.Dependencies.Count);
+    }
+
+    [Theory]
+    [InlineData("unknown", "connection-a", "unknown_reference")]
+    [InlineData(StubContributor.SourceName, "connection-a", "duplicate_reference")]
+    public async Task InvalidSelectionFailsClosedWithoutMutation(string source, string ownerId, string expectedCode)
+    {
+        var contributor = new StubContributor([Dependency("connection-a")]);
+        var (store, coordinator) = await CreateCoordinatorAsync(contributor);
+        var impact = Assert.IsType<RoleDeletionInspectionResult.Success>(await coordinator.InspectAsync("workflow-user", Administrator())).Impact;
+        var selections = expectedCode == "duplicate_reference"
+            ? new[]
+            {
+                new RoleDeletionReferenceSelection(source, ownerId),
+                new RoleDeletionReferenceSelection(source, ownerId)
+            }
+            : new[] { new RoleDeletionReferenceSelection(source, ownerId) };
+
+        var result = await coordinator.RemediateAndDeleteAsync(new(
+            "workflow-user",
+            Administrator(),
+            impact.DependencyVersion,
+            true,
+            true,
+            true)
+        {
+            SelectedReferences = selections
+        });
+
+        var validation = Assert.IsType<RoleDeletionOperationResult.ValidationFailed>(result);
+        Assert.Equal(expectedCode, validation.Code);
+        Assert.NotNull(await store.FindAsync(new() { Id = "workflow-user" }));
+        Assert.Single(contributor.Dependencies);
+    }
+
     private static async Task<(MemoryRoleStore Store, RoleDeletionCoordinator Coordinator)> CreateCoordinatorAsync(IRoleDeletionDependencyContributor contributor)
     {
         var store = new MemoryRoleStore(new MemoryStore<Role>(), TestTenantAccessor.Default);
@@ -177,15 +335,16 @@ public class RoleDeletionCoordinatorTests
 
         public ValueTask<RoleReferenceRemovalResult> RemoveEditableReferencesAsync(RoleReferenceRemovalRequest request, CancellationToken cancellationToken = default)
         {
+            var selectedOwnerIds = request.Dependencies.Select(x => x.OwnerId).ToHashSet(StringComparer.Ordinal);
             if (failAfterFirst)
             {
-                var changed = Dependencies.OrderBy(x => x.OwnerId, StringComparer.Ordinal).First();
+                var changed = Dependencies.Where(x => selectedOwnerIds.Contains(x.OwnerId)).OrderBy(x => x.OwnerId, StringComparer.Ordinal).First();
                 Dependencies = Dependencies.Where(x => !string.Equals(x.OwnerId, changed.OwnerId, StringComparison.Ordinal)).ToArray();
                 return ValueTask.FromResult<RoleReferenceRemovalResult>(new RoleReferenceRemovalResult.Failed("simulated", [changed.OwnerId]));
             }
 
-            var changedOwnerIds = Dependencies.Select(x => x.OwnerId).ToArray();
-            Dependencies = [];
+            var changedOwnerIds = Dependencies.Where(x => selectedOwnerIds.Contains(x.OwnerId)).Select(x => x.OwnerId).ToArray();
+            Dependencies = Dependencies.Where(x => !selectedOwnerIds.Contains(x.OwnerId)).ToArray();
             return ValueTask.FromResult<RoleReferenceRemovalResult>(new RoleReferenceRemovalResult.Success(changedOwnerIds));
         }
 
