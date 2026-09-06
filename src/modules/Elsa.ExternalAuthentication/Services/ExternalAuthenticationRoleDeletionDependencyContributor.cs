@@ -147,7 +147,9 @@ public sealed class ExternalAuthenticationRoleDeletionDependencyContributor(
 
                 if (request.SelectedReferences is not null && removesLastDefaultRole)
                 {
-                    var roleStore = roleStores.SingleOrDefault();
+                    // Match the default DI container's direct-service semantics: when persistence
+                    // replaces the in-memory store, the last registration is the active store.
+                    var roleStore = roleStores.LastOrDefault();
                     if (roleStore is null)
                         return new RoleReferenceRemovalResult.Failed("replacement_role_unavailable_or_unauthorized", changedOwnerIds);
                     var replacement = await roleStore.FindAsync(new() { Id = request.ReplacementRoleId }, cancellationToken);

@@ -139,6 +139,47 @@ public class ExternalAuthenticationRoleDeletionDependencyContributorTests
     }
 
     [Fact]
+    public async Task UsesTheActiveRoleStoreWhenPersistenceReplacesTheDefaultStore()
+    {
+        var databaseConnection = Connection(
+            "database",
+            new PolicySelection(
+                CreateUserUnlinkedIdentityPolicy.PolicyType,
+                1,
+                JsonSerializer.SerializeToElement(new { defaultRoleIds = new[] { "workflow-user" } })));
+        var connectionStore = new InMemoryIdentityProviderConnectionStore();
+        Assert.IsType<ConnectionMutationResult.Created>(await connectionStore.CreateAsync(databaseConnection));
+        var replacedStore = new MemoryRoleStore(new MemoryStore<Role>(), TestTenantAccessor.Default);
+        var activeStore = new MemoryRoleStore(new MemoryStore<Role>(), TestTenantAccessor.Default);
+        await activeStore.SaveAsync(new Role { Id = "workflow-user", Name = "Workflow user", Permissions = [] });
+        await activeStore.SaveAsync(new Role { Id = "replacement-role", Name = "Replacement role", Permissions = [] });
+        var roleAuthorizationService = new RoleAuthorizationService(new StoreBasedRoleProvider(activeStore), new PermissionEvaluator());
+        var services = new ServiceCollection().BuildServiceProvider();
+        var contributor = new ExternalAuthenticationRoleDeletionDependencyContributor(
+            connectionStore,
+            new MutableOptionsMonitor<ExternalAuthenticationOptions>(new ExternalAuthenticationOptions()),
+            [roleAuthorizationService],
+            [replacedStore, activeStore],
+            new InMemoryConnectionRegistryVersionStore(),
+            new ConnectionRevisionCalculator(),
+            new ExternalAuthenticationSecurityNotifier(services),
+            new PermissionEvaluator());
+        var snapshot = await contributor.InspectAsync("workflow-user");
+        var request = new RoleReferenceRemovalRequest(
+            "workflow-user",
+            Administrator(),
+            snapshot.Version,
+            snapshot.Dependencies)
+        {
+            SelectedReferences = [new RoleDeletionReferenceSelection(ExternalAuthenticationRoleDeletionDependencyContributor.SourceName, databaseConnection.Id)],
+            ReplacementRoleId = "replacement-role"
+        };
+
+        Assert.IsType<RoleReferenceRemovalValidationResult.Valid>(await contributor.ValidateRemovalAsync(request));
+        Assert.IsType<RoleReferenceRemovalResult.Success>(await contributor.RemoveEditableReferencesAsync(request));
+    }
+
+    [Fact]
     public async Task RejectsMissingReplacementForSelectedFinalDefaultRole()
     {
         var databaseConnection = Connection(
